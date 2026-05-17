@@ -1052,10 +1052,11 @@ function AdminConsolePage({ formId }: { formId: string }) {
     if (account) forgetSessionKey(account.address);
     setSessionKey(null);
     setRows({});
+    autoLoadedRef.current.clear();
     toast.message("Session key forgotten");
   };
 
-  const autoLoadedRef = useRef<Set<number>>(new Set());
+  const autoLoadedRef = useRef<Set<string>>(new Set());
 
   const decryptOne = async (s: SubmissionView): Promise<DecodedResponse | null> => {
     if (!ctx) return null;
@@ -1073,13 +1074,36 @@ function AdminConsolePage({ formId }: { formId: string }) {
             (v) => (v as { kind?: string }).kind === "encrypted",
           ));
       if (hasEncrypted) {
-        if (!sessionKey) throw new Error("Unlock the session key first.");
-        decoded = await decodeResponseBlob({
-          blob,
-          suiClient,
-          sessionKey,
-          formId: ctx.form.formId,
-        });
+        if (!sessionKey) {
+          // Without a session key we cannot fetch decryption keys from Seal.
+          // For a "form" envelope the entire payload is sealed, so there is
+          // nothing to surface — keep behaviour as before (gated by Decrypt).
+          if (blob.envelope === "form") {
+            throw new Error("Unlock the session key first.");
+          }
+          // For a "fields" envelope we can still expose the plaintext
+          // (non-sensitive) fields immediately so the row preview isn't
+          // entirely empty while the admin is still locked.
+          const values: Record<string, FieldValue> = {};
+          for (const [fid, v] of Object.entries(blob.values)) {
+            if ((v as { kind?: string }).kind !== "encrypted") {
+              values[fid] = v as FieldValue;
+            }
+          }
+          decoded = {
+            values,
+            submittedAtMs: blob.submittedAtMs,
+            partial: true,
+            errors: [],
+          };
+        } else {
+          decoded = await decodeResponseBlob({
+            blob,
+            suiClient,
+            sessionKey,
+            formId: ctx.form.formId,
+          });
+        }
       } else {
         const values = (blob as { values: Record<string, FieldValue> }).values;
         decoded = {
@@ -1092,7 +1116,8 @@ function AdminConsolePage({ formId }: { formId: string }) {
       setRows((r) => ({ ...r, [s.index]: { decoded, rawBlob: blob, loading: false } }));
       return decoded;
     } catch (e) {
-      autoLoadedRef.current.delete(s.index);
+      autoLoadedRef.current.delete(`${s.index}:locked`);
+      autoLoadedRef.current.delete(`${s.index}:unlocked`);
       setRows((r) => ({
         ...r,
         [s.index]: {
@@ -1107,23 +1132,28 @@ function AdminConsolePage({ formId }: { formId: string }) {
 
   const decryptAll = async () => {
     for (const s of filtered) {
-      if (rows[s.index]?.decoded) continue;
+      const cur = rows[s.index]?.decoded;
+      // Skip rows that are already fully decoded; re-run for rows that were
+      // only partially decoded while the session was locked.
+      if (cur && !cur.partial) continue;
       await decryptOne(s);
     }
   };
 
   useEffect(() => {
     if (!ctx) return;
-    const sessionRequired =
-      ctx.form.isPrivate || ctx.schema.fields.some((f) => f.sensitive);
-    if (sessionRequired) return;
     for (const s of subs) {
-      if (autoLoadedRef.current.has(s.index)) continue;
-      autoLoadedRef.current.add(s.index);
+      // Re-trigger when the session state changes so previously-locked rows
+      // can be fully decrypted now that a session key is available.
+      const key = `${s.index}:${sessionKey ? "unlocked" : "locked"}`;
+      if (autoLoadedRef.current.has(key)) continue;
+      autoLoadedRef.current.add(key);
+      const cur = rows[s.index]?.decoded;
+      if (cur && !cur.partial) continue;
       void decryptOne(s);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx, subs]);
+  }, [ctx, subs, sessionKey]);
 
   const collectExportSnapshot = async (): Promise<Record<number, DecodedResponse>> => {
     const snapshot: Record<number, DecodedResponse> = {};
@@ -1178,9 +1208,16 @@ function AdminConsolePage({ formId }: { formId: string }) {
     const lines = [cols.map(escape).join(",")];
     for (const s of subs) {
       const decoded = snapshot[s.index];
-      const valuesByLabel = ctx.schema.fields.map((f) =>
-        decoded ? valueToCell(decoded.values[f.id]) : placeholderFor(s, f),
-      );
+      const valuesByLabel = ctx.schema.fields.map((f) => {
+        if (!decoded) return placeholderFor(s, f);
+        const v = decoded.values[f.id];
+        // A sensitive field whose plaintext is missing means the export is
+        // running while the row is still sealed — surface that explicitly.
+        if (v === undefined && (ctx.form.isPrivate || f.sensitive)) {
+          return "(encrypted)";
+        }
+        return valueToCell(v);
+      });
       lines.push(
         [
           s.index,
@@ -1749,6 +1786,7 @@ function AdminRow({
   onUpdate: (patch: { priority?: number; tag?: string; note?: string | null }) => void;
 }) {
   const decoded = row?.decoded;
+  const fullyDecrypted = !!decoded && !decoded.partial;
   const hasEncrypted =
     schema.isPrivate || schema.fields.some((f) => f.sensitive);
 
@@ -1793,7 +1831,7 @@ function AdminRow({
         </td>
         <td className="px-4 py-3 align-top">
           {hasEncrypted ? (
-            decoded ? (
+            fullyDecrypted ? (
               <Badge className="gap-1 rounded-full border-leaf/40 bg-leaf/12 text-leaf">
                 <Icon icon={CheckmarkCircle02Icon} size={11} strokeWidth={2.2} />
                 decrypted
@@ -1817,7 +1855,7 @@ function AdminRow({
         </td>
         <td className="px-4 py-3 align-top text-right">
           <div className="flex items-center justify-end gap-1">
-            {hasEncrypted && !decoded && (
+            {hasEncrypted && !fullyDecrypted && (
               <Button
                 size="icon-sm"
                 variant="ghost"
@@ -1838,7 +1876,7 @@ function AdminRow({
                 />
               </Button>
             )}
-            {decoded && hasEncrypted && (
+            {fullyDecrypted && hasEncrypted && (
               <span
                 title="Decrypted in this session"
                 aria-label="Decrypted"
@@ -1954,13 +1992,11 @@ function AdminResponseDetails({
       </div>
     );
   }
-  if (!decoded && hasEncrypted) {
-    const sealedFields = schema.isPrivate
-      ? schema.fields
-      : schema.fields.filter((f) => f.sensitive);
+  if (!decoded && hasEncrypted && schema.isPrivate) {
+    // Whole-form envelope: nothing can be surfaced until the session unlocks.
     return (
       <div className="space-y-3">
-        {sealedFields.map((f) => (
+        {schema.fields.map((f) => (
           <div
             key={f.id}
             className="rounded-2xl border border-ink/10 bg-card p-3 shadow-soft"
@@ -2005,6 +2041,9 @@ function AdminResponseDetails({
     <div className="space-y-3">
       {schema.fields.map((f) => {
         const v = decoded.values[f.id];
+        // A sensitive field still without a plaintext value means it is
+        // currently sealed (session locked or decryption pending).
+        const stillSealed = f.sensitive && v === undefined;
         return (
           <div
             key={f.id}
@@ -2018,11 +2057,17 @@ function AdminResponseDetails({
                 </Badge>
               )}
             </div>
-            <AdminFieldDisplay value={v} />
+            {stillSealed ? (
+              <div className="mt-2">
+                <SealedCipher size="sm" hideLabel seed={f.id} />
+              </div>
+            ) : (
+              <AdminFieldDisplay value={v} />
+            )}
           </div>
         );
       })}
-      {decoded.partial && (
+      {decoded.partial && decoded.errors.length > 0 && (
         <p className="text-xs text-destructive">
           Partial decode: {decoded.errors.join("; ")}
         </p>
