@@ -1,0 +1,25 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="nw-tusk" x1="6" y1="56" x2="58" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1a1530" />
+      <stop offset="1" stop-color="#1a1530" stop-opacity="0.78" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#fbf6e8" />
+  <path
+    d="M10 56 V8 L52 50 V8"
+    stroke="url(#nw-tusk)"
+    stroke-width="6.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+  <g stroke="#1a1530" stroke-width="1.4" stroke-linecap="round" opacity="0.45">
+    <path d="M14 12 L14 14" />
+    <path d="M14 19 L14 21" />
+    <path d="M14 26 L14 28" />
+    <path d="M14 33 L14 35" />
+    <path d="M14 40 L14 42" />
+    <path d="M14 47 L14 49" />
+  </g>
+</svg>
