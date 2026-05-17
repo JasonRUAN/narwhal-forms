@@ -41,6 +41,7 @@ import {
   FIELD_LABELS,
   FIELD_TYPES,
   formSchemaJson,
+  withFallbackLabels,
   type Field,
   type FieldType,
   type FormSchemaJson,
@@ -173,7 +174,7 @@ export default function NewFormPage() {
       requireWallet,
       allowDuplicate,
       allowlist,
-      fields,
+      fields: withFallbackLabels(fields),
     };
     const parsed = formSchemaJson.safeParse(draft);
     if (!parsed.success) {
@@ -605,7 +606,7 @@ function FieldRow({
         </span>
         <div>
           <div className="text-sm font-medium text-ink">
-            {field.label || "(untitled)"}
+            {field.label?.trim() || FIELD_LABELS[field.type]}
           </div>
           <div className="font-mono-display text-[10.5px] uppercase tracking-[0.22em] text-ink/55">
             {FIELD_LABELS[field.type]}
@@ -737,7 +738,11 @@ function FieldEditor({
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label>Label</Label>
-          <Input value={field.label} onChange={(e) => onChange({ label: e.target.value })} />
+          <Input
+            value={field.label}
+            onChange={(e) => onChange({ label: e.target.value })}
+            placeholder={FIELD_LABELS[field.type]}
+          />
         </div>
         <div className="space-y-2">
           <Label>Helper text</Label>

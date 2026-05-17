@@ -110,12 +110,19 @@ export const formSchemaJson = z
 
 export type FormSchemaJson = z.infer<typeof formSchemaJson>;
 
-/** Defaults used when adding a new field of a given type in the builder. */
+/**
+ * Defaults used when adding a new field of a given type in the builder.
+ *
+ * `label` is intentionally left empty so the editor input shows the type name
+ * as a real placeholder (and the user can start typing without first clearing
+ * pre-filled text). Empty labels are auto-filled with `FIELD_LABELS[type]` at
+ * publish time — see `withFallbackLabels` below.
+ */
 export function defaultFieldFor(type: FieldType, idx: number): Field {
   const base: Field = {
     id: `f_${idx}_${Math.random().toString(36).slice(2, 8)}`,
     type,
-    label: FIELD_LABELS[type],
+    label: "",
     required: false,
     sensitive: false,
   };
@@ -125,6 +132,19 @@ export function defaultFieldFor(type: FieldType, idx: number): Field {
   if (type === "video") base.maxFileMb = 50;
   if (type === "short_text") base.maxLength = 120;
   return base;
+}
+
+/**
+ * Replace blank labels (after trimming) with the human-readable type name so
+ * the form still satisfies `label.min(1)` even when the creator skipped the
+ * Label input entirely.
+ */
+export function withFallbackLabels(fields: Field[]): Field[] {
+  return fields.map((f) => {
+    const trimmed = f.label?.trim() ?? "";
+    if (trimmed.length > 0) return { ...f, label: trimmed };
+    return { ...f, label: FIELD_LABELS[f.type] };
+  });
 }
 
 /**
