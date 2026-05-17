@@ -305,6 +305,7 @@ export interface FormSummary {
 const FORM_CREATED_TYPE = (pkg: string) => `${pkg}::forms::FormCreated`;
 const SUB_ADDED_TYPE = (pkg: string) => `${pkg}::submissions::SubmissionAdded`;
 const SUB_UPDATED_TYPE = (pkg: string) => `${pkg}::submissions::SubmissionUpdated`;
+const ADMIN_ADDED_TYPE = (pkg: string) => `${pkg}::forms::AdminAdded`;
 
 interface FormCreatedEvent {
   form_id: string;
@@ -515,4 +516,32 @@ export async function listAdminCaps(owner: string): Promise<AdminCapInfo[]> {
     });
   }
   return caps;
+}
+
+interface AdminAddedEvent {
+  form_id: string;
+  admin: string;
+}
+
+/**
+ * Return the unique set of form IDs for which `admin` has been granted
+ * admin rights via `forms::add_admin`. Note: this is event-derived, so a
+ * subsequent `remove_admin` is NOT reflected here — callers should verify
+ * via {@link getForm} that `admins` still includes the address before
+ * surfacing the form as actionable.
+ */
+export async function listFormIdsWhereAdmin(admin: string): Promise<string[]> {
+  const client = getJsonRpcClient();
+  const events = await client.queryEvents({
+    query: { MoveEventType: ADMIN_ADDED_TYPE(NARWHAL_CONFIG.packageId) },
+    limit: 1000,
+    order: "descending",
+  });
+  const formIds = new Set<string>();
+  for (const ev of events.data) {
+    const p = ev.parsedJson as AdminAddedEvent | undefined;
+    if (!p) continue;
+    if (p.admin === admin) formIds.add(p.form_id);
+  }
+  return Array.from(formIds);
 }

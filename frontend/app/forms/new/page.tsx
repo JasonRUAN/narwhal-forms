@@ -81,8 +81,11 @@ export default function NewFormPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
-  const [requireWallet, setRequireWallet] = useState(false);
-  const [allowDuplicate, setAllowDuplicate] = useState(true);
+  // Default to wallet-gated + dedupe: most creators expect one response per
+  // wallet, and `allow_duplicate=false` requires `require_wallet=true` to
+  // satisfy `ENoDuplicateRequiresWallet` in `forms.move`.
+  const [requireWallet, setRequireWallet] = useState(true);
+  const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [admins, setAdmins] = useState<string[]>([]);
   const [adminInput, setAdminInput] = useState("");
   const [allowlist, setAllowlist] = useState<string[]>([]);

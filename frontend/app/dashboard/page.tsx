@@ -19,19 +19,50 @@ import { Icon } from "@/components/icon";
 import { NarwhalMark } from "@/components/narwhal-mark";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getForm, listAdminCaps, type FormOnChain } from "@/lib/sui";
+import {
+  getForm,
+  listAdminCaps,
+  listFormIdsWhereAdmin,
+  type FormOnChain,
+} from "@/lib/sui";
 
 interface DashboardForm extends FormOnChain {
-  capId: string;
+  /** Present when the wallet owns the AdminCap (i.e. the form's creator). */
+  capId: string | null;
+  /** "creator" → owns AdminCap; "admin" → on the form's `admins` allowlist. */
+  role: "creator" | "admin";
 }
 
 async function loadDashboard(owner: string): Promise<DashboardForm[]> {
-  const caps = await listAdminCaps(owner);
+  // Two parallel sources of "forms I can administer":
+  //   1. AdminCaps owned by `owner` (forms I created).
+  //   2. AdminAdded events naming `owner` (forms whose creator granted me
+  //      admin rights via `forms::add_admin`). These never transfer an
+  //      AdminCap, so they wouldn't appear via path (1).
+  const [caps, adminFormIds] = await Promise.all([
+    listAdminCaps(owner),
+    listFormIdsWhereAdmin(owner),
+  ]);
+
+  const capByFormId = new Map(caps.map((c) => [c.formId, c.capId]));
+  // De-duplicate: if I'm both creator and listed as admin (unusual but
+  // possible), the creator role wins because it carries the AdminCap.
+  const formIds = new Set<string>([...capByFormId.keys(), ...adminFormIds]);
+
   const results = await Promise.all(
-    caps.map(async (cap) => {
-      const form = await getForm(cap.formId);
+    Array.from(formIds).map(async (formId) => {
+      const form = await getForm(formId);
       if (!form) return null;
-      return { ...form, capId: cap.capId } as DashboardForm;
+      const capId = capByFormId.get(formId) ?? null;
+      // Re-verify on-chain that I'm still an admin; `remove_admin` would
+      // have cleared the VecSet entry while the historical event remains.
+      const stillAdmin = capId !== null || form.admins.includes(owner);
+      if (!stillAdmin) return null;
+      return {
+        ...form,
+        capId,
+        role: capId ? "creator" : "admin",
+      } as DashboardForm;
     }),
   );
   return results
@@ -158,6 +189,15 @@ function FormCard({ form, index }: { form: DashboardForm; index: number }) {
           /{(index + 1).toString().padStart(2, "0")}
         </span>
         <div className="flex flex-wrap items-center gap-1.5">
+          {form.role === "admin" && (
+            <Badge
+              variant="outline"
+              className="rounded-full border-mint/50 bg-mint/15 px-2 py-0 text-[10px] text-ink/75"
+              title="You were added to this form's admin allowlist by its creator."
+            >
+              admin
+            </Badge>
+          )}
           {form.isPrivate && (
             <Badge className="rounded-full border-coral/40 bg-coral/12 px-2 py-0 text-[10px] text-coral">
               <Icon icon={LockKeyIcon} size={10} strokeWidth={2.2} className="mr-1" /> private
