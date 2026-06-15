@@ -60,7 +60,7 @@ import {
 } from "@/lib/config";
 import { buildResponseBlob } from "@/lib/responses";
 import { Markdown } from "@/lib/markdown";
-import { fetchJSON, uploadJSON } from "@/lib/walrus";
+import { fetchJSON, isBlobNotFound, uploadJSON } from "@/lib/walrus";
 import {
   decodeResponseBlob,
   fieldValueToText,
@@ -2391,6 +2391,8 @@ function AdminNotePopover({
     },
     enabled: open && !!noteBlobId,
     staleTime: 5 * 60 * 1000,
+    retry: (failureCount, error) =>
+      !isBlobNotFound(error) && failureCount < 3,
   });
 
   const existingNote = noteQuery.data?.note ?? "";
@@ -2520,15 +2522,19 @@ function AdminNotePopover({
           <div className="flex items-center justify-between gap-2">
             <p className="flex items-center gap-1.5 text-xs text-destructive">
               <AlertCircleIcon size={11} />
-              Could not load current note
+              {isBlobNotFound(noteQuery.error)
+                ? "Note expired on Walrus — save again to re-pin"
+                : "Could not load current note"}
             </p>
-            <button
-              type="button"
-              onClick={() => noteQuery.refetch()}
-              className="font-mono-display text-[10px] uppercase tracking-[0.16em] text-ink/55 underline-offset-2 hover:text-ink hover:underline"
-            >
-              retry
-            </button>
+            {!isBlobNotFound(noteQuery.error) && (
+              <button
+                type="button"
+                onClick={() => noteQuery.refetch()}
+                className="font-mono-display text-[10px] uppercase tracking-[0.16em] text-ink/55 underline-offset-2 hover:text-ink hover:underline"
+              >
+                retry
+              </button>
+            )}
           </div>
         )}
         <div className="flex items-center justify-between font-mono-display text-[10px] text-ink/40">

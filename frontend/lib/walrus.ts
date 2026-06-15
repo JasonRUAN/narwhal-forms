@@ -21,6 +21,25 @@ const PUBLISHER = NARWHAL_CONFIG.walrus.publisher.replace(/\/$/, "");
 const AGGREGATOR = NARWHAL_CONFIG.walrus.aggregator.replace(/\/$/, "");
 const DEFAULT_EPOCHS = NARWHAL_CONFIG.walrus.defaultEpochs;
 
+/**
+ * Thrown when the aggregator returns 404 for a blob. On Walrus this almost
+ * always means the blob's storage period elapsed and it was garbage-collected
+ * (testnet epochs are short), not that the aggregator URL is wrong.
+ */
+export class BlobNotFoundError extends Error {
+  readonly blobId: string;
+  constructor(blobId: string) {
+    super(`Walrus blob not found (expired or never stored): ${blobId}`);
+    this.name = "BlobNotFoundError";
+    this.blobId = blobId;
+  }
+}
+
+/** Whether an error originates from a missing/expired Walrus blob. */
+export function isBlobNotFound(err: unknown): err is BlobNotFoundError {
+  return err instanceof BlobNotFoundError;
+}
+
 /** Upload raw bytes to Walrus and return the resulting blob info. */
 export async function putBlob(
   data: Uint8Array | Blob,
@@ -59,6 +78,9 @@ export async function putBlob(
 /** Download bytes from Walrus aggregator. */
 export async function getBlob(blobId: string): Promise<Uint8Array> {
   const res = await fetch(`${AGGREGATOR}/v1/blobs/${encodeURIComponent(blobId)}`);
+  if (res.status === 404) {
+    throw new BlobNotFoundError(blobId);
+  }
   if (!res.ok) {
     throw new Error(`Walrus aggregator ${res.status}: ${res.statusText}`);
   }

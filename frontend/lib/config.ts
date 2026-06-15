@@ -35,7 +35,9 @@ export const NARWHAL_CONFIG = {
     aggregator:
       process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL ??
       WALRUS_DEFAULTS[NETWORK].aggregator,
-    defaultEpochs: 20,
+    // Walrus caps a single blob at 53 epochs ahead. Testnet epochs are short
+    // (1-2 days), so anything smaller expires quickly and 404s; use the max.
+    defaultEpochs: 53,
   },
   seal: {
     threshold: 2,
